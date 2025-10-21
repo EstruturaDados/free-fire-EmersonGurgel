@@ -1,48 +1,56 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h> // Para medir o tempo das operações
+#include <time.h>
 
 // =========================================================================
-// 1. CRIAÇÃO DA STRUCT Item
+// 1. CRIAÇÃO DA STRUCT Componente
 // =========================================================================
 
-// Struct base para representar um item no inventário
+// Struct base para representar um componente da torre de fuga
 typedef struct {
     char nome[30];
-    char tipo[20]; // Ex: arma, munição, cura, ferramenta
-    int quantidade;
-} Item;
+    char tipo[20]; // Ex: "controle", "suporte", "propulsão"
+    int prioridade; // De 1 (baixa) a 10 (alta)
+} Componente;
 
 // =========================================================================
-// VARIÁVEIS GLOBAIS E CONSTANTES (MOCHILA VETOR)
+// VARIÁVEIS GLOBAIS E CONSTANTES
 // =========================================================================
 
-#define MAX_ITENS 10 // Capacidade máxima do inventário (Vetor)
-Item inventario[MAX_ITENS];
-int numItens = 0;
-// Flag para indicar se o vetor está ordenado, essencial para a Busca Binária
-int vetorOrdenado = 0;
+#define MAX_COMPONENTES 20 // Capacidade máxima de componentes
+Componente componentes[MAX_COMPONENTES];
+int numComponentes = 0;
 
-// Contador de comparações para análise de desempenho
+// Variáveis de feedback de desempenho
 long long contadorComparacoes = 0;
+double tempoExecucao = 0.0;
+
+// Flag para controle da busca binária: 0=desordenado, 1=ordenado por nome, 2=ordenado por tipo, 3=ordenado por prioridade
+int vetorOrdenadoPor = 0;
 
 // =========================================================================
-// PROTÓTIPOS DAS FUNÇÕES
+// PROTÓTIPOS DE FUNÇÕES
 // =========================================================================
 
 void limparBuffer();
-Item lerNovoItem();
 void exibirMenu();
+void lerNovoComponente();
+void mostrarComponentes(Componente array[], int tamanho);
 
-// Funções de Inventário
-void inserirItem();
-void removerItem();
-void listarItens();
-void ordenarInventario();
-void buscarSequencial();
-void buscarBinaria();
+// Algoritmos de Ordenação (funções obrigatórias)
+void bubbleSortNome(Componente array[], int tamanho);
+void insertionSortTipo(Componente array[], int tamanho);
+void selectionSortPrioridade(Componente array[], int tamanho);
 
+// Algoritmo de Busca (função obrigatória)
+int buscaBinariaPorNome(Componente array[], int tamanho, const char chave[]);
+
+// Função de Controle para executar ordenação e medição (medirTempo)
+void medirEOrdenar(int opcao);
+
+// Função auxiliar de troca
+void trocar(Componente *a, Componente *b);
 
 // =========================================================================
 // FUNÇÕES AUXILIARES
@@ -57,249 +65,253 @@ void limparBuffer() {
 }
 
 /**
- * @brief Obtém os dados de um novo item do usuário.
- * @return Item A struct Item preenchida.
+ * @brief Troca dois componentes de posição.
  */
-Item lerNovoItem() {
-    Item novoItem;
-    limparBuffer(); // Garante que o buffer esteja limpo
+void trocar(Componente *a, Componente *b) {
+    Componente temp = *a;
+    *a = *b;
+    *b = temp;
+}
 
-    printf("  Nome (max 29): ");
-    fgets(novoItem.nome, sizeof(novoItem.nome), stdin);
-    novoItem.nome[strcspn(novoItem.nome, "\n")] = 0; // Remove o '\n'
+/**
+ * @brief Obtém os dados de um novo componente do usuário.
+ */
+void lerNovoComponente() {
+    if (numComponentes >= MAX_COMPONENTES) {
+        printf("\n[ALERTA] Limite de componentes (%d) atingido.\n", MAX_COMPONENTES);
+        return;
+    }
 
-    printf("  Tipo (ex: cura, arma, max 19): ");
-    fgets(novoItem.tipo, sizeof(novoItem.tipo), stdin);
-    novoItem.tipo[strcspn(novoItem.tipo, "\n")] = 0; // Remove o '\n'
+    Componente *novoComp = &componentes[numComponentes];
+    limparBuffer();
 
-    printf("  Quantidade: ");
-    while (scanf("%d", &novoItem.quantidade) != 1 || novoItem.quantidade <= 0) {
-        printf("  [ERRO] Quantidade inválida. Digite um inteiro positivo: ");
+    printf("\n--- CADASTRO DE COMPONENTE %d ---\n", numComponentes + 1);
+
+    // Leitura do Nome
+    printf("Nome do Componente (max 29): ");
+    fgets(novoComp->nome, sizeof(novoComp->nome), stdin);
+    novoComp->nome[strcspn(novoComp->nome, "\n")] = 0;
+
+    // Leitura do Tipo
+    printf("Tipo (ex: controle, suporte, propulsão, max 19): ");
+    fgets(novoComp->tipo, sizeof(novoComp->tipo), stdin);
+    novoComp->tipo[strcspn(novoComp->tipo, "\n")] = 0;
+
+    // Leitura da Prioridade (1 a 10)
+    printf("Prioridade (1 - 10, 10 é mais urgente): ");
+    while (scanf("%d", &novoComp->prioridade) != 1 || novoComp->prioridade < 1 || novoComp->prioridade > 10) {
+        printf("[ERRO] Prioridade inválida. Digite um valor entre 1 e 10: ");
         limparBuffer();
     }
-    return novoItem;
+
+    numComponentes++;
+    vetorOrdenadoPor = 0; // Cadastro desorganiza
+    printf("[SUCESSO] Componente '%s' cadastrado.\n", novoComp->nome);
 }
 
 /**
- * @brief Exibe o menu de opções para o jogador.
+ * @brief Exibe o menu principal. (Interface Amigável)
  */
 void exibirMenu() {
-    printf("\n--- MOCHILA DE COMBATE (Vetor / Lista Sequencial) ---\n");
-    printf("1. Coletar Novo Item (Inserir)\n");
-    printf("2. Descartar Item (Remover)\n");
-    printf("3. Listar Inventário (%d/%d)\n", numItens, MAX_ITENS);
-    printf("4. Organizar Itens (Ordenar por Nome)\n");
-    printf("5. Buscar Item Sequencial (Busca Lenta - O(N))\n");
-    printf("6. Buscar Item Crítico Binário (Busca Rápida - O(log N))\n");
-    printf("0. Sair do Jogo\n");
-    printf("Escolha uma opção: ");
+    printf("\n===================================================\n");
+    printf("      MÓDULO DE MONTAGEM DA TORRE DE RESGATE\n");
+    printf("===================================================\n");
+    printf("Status: %d/%d Componentes Cadastrados.\n", numComponentes, MAX_COMPONENTES);
+    printf("Estratégia Atual: ");
+    if (vetorOrdenadoPor == 1) printf("Ordenado por Nome (Bubble Sort)\n");
+    else if (vetorOrdenadoPor == 2) printf("Ordenado por Tipo (Insertion Sort)\n");
+    else if (vetorOrdenadoPor == 3) printf("Ordenado por Prioridade (Selection Sort)\n");
+    else printf("Nenhuma (Desordenado)\n");
+    printf("---------------------------------------------------\n");
+    printf("1. Cadastrar Novo Componente\n");
+    printf("2. Listar Componentes Atuais\n");
+    printf("3. Estratégia A: Ordenar por NOME (Bubble Sort) -> Permite Busca Binária\n");
+    printf("4. Estratégia B: Ordenar por TIPO (Insertion Sort)\n");
+    printf("5. Estratégia C: Ordenar por PRIORIDADE (Selection Sort)\n");
+    printf("6. Buscar Componente-Chave (Busca Binária Otimizada)\n");
+    printf("0. Finalizar Missão\n");
+    printf("Opção: ");
+}
+
+/**
+ * @brief Exibe o vetor de componentes formatado. (Função obrigatória)
+ */
+void mostrarComponentes(Componente array[], int tamanho) {
+    if (tamanho == 0) {
+        printf("\n[INFO] Nenhum componente cadastrado.\n");
+        return;
+    }
+
+    printf("\n--- SEQUÊNCIA DE MONTAGEM ---\n");
+    printf("+----+------------------------------+--------------------+------------+\n");
+    printf("| #  | NOME                         | TIPO               | PRIORIDADE |\n");
+    printf("+----+------------------------------+--------------------+------------+\n");
+    for (int i = 0; i < tamanho; i++) {
+        printf("| %-2d | %-28s | %-18s | %-10d |\n",
+               i + 1, array[i].nome, array[i].tipo, array[i].prioridade);
+    }
+    printf("+----+------------------------------+--------------------+------------+\n");
 }
 
 // =========================================================================
-// FUNÇÕES DE INVENTÁRIO (VETOR)
+// 3. ALGORITMOS DE ORDENAÇÃO E MEDIÇÃO DE DESEMPENHO
 // =========================================================================
 
 /**
- * @brief Insere um novo item no final do vetor (mochila).
+ * @brief Ordena por nome usando Bubble Sort. (Função obrigatória)
  */
-void inserirItem() {
-    if (numItens >= MAX_ITENS) {
-        printf("\n[ALERTA] Mochila cheia (%d/%d). Impossível coletar mais itens.\n", numItens, MAX_ITENS);
-        return;
-    }
-
-    printf("\n--- COLETAR ITEM ---\n");
-    inventario[numItens] = lerNovoItem();
-    numItens++;
-    vetorOrdenado = 0; // Qualquer inserção desorganiza o vetor
-    printf("[SUCESSO] Item '%s' coletado.\n", inventario[numItens - 1].nome);
-}
-
-/**
- * @brief Remove um item do vetor por nome (Busca Sequencial seguida de reorganização).
- */
-void removerItem() {
-    if (numItens == 0) {
-        printf("\n[ALERTA] Mochila vazia. Nada a remover.\n");
-        return;
-    }
-
-    char nomeRemover[30];
-    printf("\n--- DESCARTAR ITEM ---\n");
-    printf("Digite o nome do item para descartar: ");
-    limparBuffer();
-    fgets(nomeRemover, sizeof(nomeRemover), stdin);
-    nomeRemover[strcspn(nomeRemover, "\n")] = 0;
-
-    int i, encontrado = -1;
-    for (i = 0; i < numItens; i++) {
-        if (strcmp(inventario[i].nome, nomeRemover) == 0) {
-            encontrado = i;
-            break;
-        }
-    }
-
-    if (encontrado != -1) {
-        // Reorganização: desloca elementos subsequentes para a esquerda
-        for (i = encontrado; i < numItens - 1; i++) {
-            inventario[i] = inventario[i + 1];
-        }
-        numItens--;
-        vetorOrdenado = 0; // A remoção anula a ordenação prévia (para segurança)
-        printf("[SUCESSO] Item '%s' descartado.\n", nomeRemover);
-    } else {
-        printf("[ALERTA] Item '%s' não encontrado.\n", nomeRemover);
-    }
-}
-
-/**
- * @brief Lista todos os itens do vetor.
- */
-void listarItens() {
-    printf("\n--- INVENTÁRIO ATUAL (%d/%d) ---\n", numItens, MAX_ITENS);
-    printf("[STATUS] Ordenação: %s\n", vetorOrdenado ? "ORDENADO (Busca Binária disponível)" : "DESORDENADO");
-
-    if (numItens == 0) {
-        printf("A mochila está vazia.\n");
-        return;
-    }
-
-    printf("+----+--------------------+-----------+------+\n");
-    printf("| #  | NOME               | TIPO      | QTD  |\n");
-    printf("+----+--------------------+-----------+------+\n");
-    for (int i = 0; i < numItens; i++) {
-        printf("| %-2d | %-18s | %-9s | %-4d |\n",
-               i + 1, inventario[i].nome, inventario[i].tipo, inventario[i].quantidade);
-    }
-    printf("+----+--------------------+-----------+------+\n");
-}
-
-/**
- * @brief Ordena o vetor pelo nome (Selection Sort).
- */
-void ordenarInventario() {
-    if (numItens <= 1) {
-        printf("\n[INFO] Inventário já ordenado (0 ou 1 item).\n");
-        vetorOrdenado = 1;
-        return;
-    }
-
-    // Algoritmo Selection Sort
-    for (int i = 0; i < numItens - 1; i++) {
-        int min_idx = i;
-        for (int j = i + 1; j < numItens; j++) {
-            // Comparação por nome
-            if (strcmp(inventario[j].nome, inventario[min_idx].nome) < 0) {
-                min_idx = j;
+void bubbleSortNome(Componente array[], int tamanho) {
+    contadorComparacoes = 0;
+    
+    for (int i = 0; i < tamanho - 1; i++) {
+        int trocou = 0;
+        for (int j = 0; j < tamanho - 1 - i; j++) {
+            // Compara o campo nome (String)
+            contadorComparacoes++; 
+            if (strcmp(array[j].nome, array[j + 1].nome) > 0) {
+                trocar(&array[j], &array[j + 1]);
+                trocou = 1;
             }
         }
-        // Troca o elemento mínimo encontrado com o elemento atual (posição i)
-        if (min_idx != i) {
-            Item temp = inventario[i];
-            inventario[i] = inventario[min_idx];
-            inventario[min_idx] = temp;
-        }
+        if (trocou == 0) break;
     }
-
-    vetorOrdenado = 1;
-    printf("\n[SUCESSO] Inventário ORGANIZADO com sucesso (Selection Sort).\n");
 }
 
 /**
- * @brief Busca sequencial de um item por nome. (Simula busca sob pressão, ineficiente)
+ * @brief Ordena por tipo usando Insertion Sort. (Função obrigatória)
  */
-void buscarSequencial() {
-    if (numItens == 0) {
-        printf("\n[ALERTA] Mochila vazia. Nada a buscar.\n");
-        return;
-    }
-
-    char nomeBuscar[30];
-    printf("\n--- BUSCA SEQUENCIAL (Zona de Perigo) ---\n");
-    printf("Digite o nome do item para buscar: ");
-    limparBuffer();
-    fgets(nomeBuscar, sizeof(nomeBuscar), stdin);
-    nomeBuscar[strcspn(nomeBuscar, "\n")] = 0;
-
+void insertionSortTipo(Componente array[], int tamanho) {
     contadorComparacoes = 0;
-    int encontrado = 0;
-    double inicio = (double)clock() / CLOCKS_PER_SEC; // Início da medição de tempo
 
-    for (int i = 0; i < numItens; i++) {
-        contadorComparacoes++; // Conta a comparação
-        if (strcmp(inventario[i].nome, nomeBuscar) == 0) {
-            encontrado = 1;
-            printf("\n[ENCONTRADO] Item '%s' localizado na posição %d.\n", nomeBuscar, i + 1);
-            printf("  Tipo: %s, Quantidade: %d\n", inventario[i].tipo, inventario[i].quantidade);
-            break;
+    for (int i = 1; i < tamanho; i++) {
+        Componente chave = array[i];
+        int j = i - 1;
+
+        // Compara o campo tipo (String)
+        while (j >= 0) {
+            contadorComparacoes++;
+            if (strcmp(array[j].tipo, chave.tipo) > 0) {
+                array[j + 1] = array[j]; // Desloca
+                j = j - 1;
+            } else {
+                break; // Saída otimizada
+            }
+        }
+        array[j + 1] = chave;
+    }
+}
+
+/**
+ * @brief Ordena por prioridade usando Selection Sort. (Função obrigatória)
+ */
+void selectionSortPrioridade(Componente array[], int tamanho) {
+    contadorComparacoes = 0;
+
+    for (int i = 0; i < tamanho - 1; i++) {
+        int indiceMax = i; // Usamos Max para ordenação decrescente de Prioridade
+        for (int j = i + 1; j < tamanho; j++) {
+            // Compara o campo prioridade (Int)
+            contadorComparacoes++; 
+            if (array[j].prioridade > array[indiceMax].prioridade) { // Ordem decrescente de prioridade
+                indiceMax = j;
+            }
+        }
+        if (indiceMax != i) {
+            trocar(&array[i], &array[indiceMax]);
         }
     }
+}
 
-    double fim = (double)clock() / CLOCKS_PER_SEC; // Fim da medição de tempo
-
-    if (!encontrado) {
-        printf("[ALERTA] Item '%s' não encontrado.\n", nomeBuscar);
+/**
+ * @brief Função de controle para medir e executar a ordenação escolhida. (Simula medirTempo)
+ */
+void medirEOrdenar(int opcao) {
+    if (numComponentes == 0) {
+        printf("\n[ALERTA] Cadastre componentes antes de ordenar.\n");
+        return;
     }
     
-    // Demonstração de desempenho
-    printf("\n--- ANÁLISE DE DESEMPENHO (Busca Sequencial) ---\n");
-    printf("Comparações (Esforço): %lld\n", contadorComparacoes);
-    printf("Tempo de Execução: %.6f segundos.\n", fim - inicio);
+    // Início da medição de tempo
+    clock_t inicio = clock();
+    
+    printf("\n--- EXECUTANDO ESTRATÉGIA DE ORGANIZAÇÃO ---\n");
+
+    if (opcao == 3) {
+        bubbleSortNome(componentes, numComponentes);
+        printf("[ESTRATÉGIA A] Montagem ordenada por NOME (Bubble Sort).\n");
+        vetorOrdenadoPor = 1;
+    } else if (opcao == 4) {
+        insertionSortTipo(componentes, numComponentes);
+        printf("[ESTRATÉGIA B] Montagem ordenada por TIPO (Insertion Sort).\n");
+        vetorOrdenadoPor = 2;
+    } else if (opcao == 5) {
+        selectionSortPrioridade(componentes, numComponentes);
+        printf("[ESTRATÉGIA C] Montagem ordenada por PRIORIDADE (Selection Sort).\n");
+        vetorOrdenadoPor = 3;
+    } else {
+        return;
+    }
+
+    // Fim da medição de tempo
+    clock_t fim = clock();
+    tempoExecucao = (double)(fim - inicio) / CLOCKS_PER_SEC;
+
+    // Feedback educacional e desempenho (Requisito: Desempenho Educacional)
+    printf("\n--- RELATÓRIO DE IMPACTO DA ESTRATÉGIA ---\n");
+    printf("Comparações Realizadas: %lld\n", contadorComparacoes);
+    printf("Tempo de Execução (s): %.6f\n", tempoExecucao);
+    printf("Impacto: Quanto menor o número de comparações e o tempo, mais rápido é o plano de fuga!\n");
+
+    mostrarComponentes(componentes, numComponentes);
 }
 
+// =========================================================================
+// 4. BUSCA BINÁRIA OTIMIZADA
+// =========================================================================
+
 /**
- * @brief Busca binária de um item por nome (Requer ordenação prévia). (Simula acesso rápido e eficiente)
+ * @brief Realiza uma Busca Binária otimizada por nome. (Função obrigatória)
+ * @return int Posição do item encontrado (base 1), ou 0 se não encontrado.
  */
-void buscarBinaria() {
-    if (!vetorOrdenado) {
-        printf("\n[ALERTA] Inventário DESORGANIZADO! É necessário Organizar (Opção 4) para a Busca Binária.\n");
-        return;
-    }
-    if (numItens == 0) {
-        printf("\n[ALERTA] Mochila vazia. Nada a buscar.\n");
-        return;
+int buscaBinariaPorNome(Componente array[], int tamanho, const char chave[]) {
+    if (vetorOrdenadoPor != 1) {
+        printf("\n[ERRO FATAL] A Busca Binária por NOME requer a Estratégia A (Opção 3) para ordenar por nome primeiro.\n");
+        return 0;
     }
 
-    char nomeBuscar[30];
-    printf("\n--- BUSCA BINÁRIA (Acesso Rápido) ---\n");
-    printf("Digite o nome do item crítico para buscar: ");
-    limparBuffer();
-    fgets(nomeBuscar, sizeof(nomeBuscar), stdin);
-    nomeBuscar[strcspn(nomeBuscar, "\n")] = 0;
+    if (tamanho == 0) return 0;
 
     contadorComparacoes = 0;
-    int inicio = 0;
-    int fim = numItens - 1;
-    int encontrado = 0;
-    double tempoInicio = (double)clock() / CLOCKS_PER_SEC; // Início da medição
+    clock_t inicio = clock();
+    
+    int baixo = 0;
+    int alto = tamanho - 1;
+    int resultado = 0; 
 
-    while (inicio <= fim) {
-        int meio = inicio + (fim - inicio) / 2;
-        int cmp = strcmp(inventario[meio].nome, nomeBuscar);
-        contadorComparacoes++; // Conta a comparação
+    while (baixo <= alto) {
+        int meio = baixo + (alto - baixo) / 2;
+        int cmp = strcmp(array[meio].nome, chave);
+        contadorComparacoes++;
 
         if (cmp == 0) {
-            encontrado = 1;
-            printf("\n[CRÍTICO ENCONTRADO] Item '%s' (Crítico) localizado na posição %d.\n", nomeBuscar, meio + 1);
-            printf("  Tipo: %s, Quantidade: %d\n", inventario[meio].tipo, inventario[meio].quantidade);
+            resultado = meio + 1; // Item encontrado (posição base 1)
             break;
         } else if (cmp < 0) {
-            inicio = meio + 1; // Item está na metade direita
+            baixo = meio + 1; // Item está na metade superior
         } else {
-            fim = meio - 1; // Item está na metade esquerda
+            alto = meio - 1; // Item está na metade inferior
         }
     }
 
-    double tempoFim = (double)clock() / CLOCKS_PER_SEC; // Fim da medição
+    clock_t fim = clock();
+    tempoExecucao = (double)(fim - inicio) / CLOCKS_PER_SEC;
 
-    if (!encontrado) {
-        printf("[ALERTA] Item '%s' não encontrado.\n", nomeBuscar);
-    }
-
-    // Demonstração de desempenho
-    printf("\n--- ANÁLISE DE DESEMPENHO (Busca Binária) ---\n");
-    printf("Comparações (Esforço): %lld\n", contadorComparacoes);
-    printf("Tempo de Execução: %.6f segundos.\n", tempoFim - tempoInicio);
+    // Relatório de Busca
+    printf("\n--- RELATÓRIO DE BUSCA BINÁRIA ---\n");
+    printf("Comparações: %lld\n", contadorComparacoes);
+    printf("Tempo de Execução: %.6f segundos.\n", tempoExecucao);
+    
+    return resultado;
 }
 
 // =========================================================================
@@ -309,45 +321,48 @@ void buscarBinaria() {
 int main() {
     int opcao;
 
-    printf("===================================================\n");
-    printf("       SISTEMA DE INVENTÁRIO DE COMBATE (VETOR)\n");
-    printf("  Análise de Estruturas: Busca Sequencial vs Binária\n");
-    printf("===================================================\n");
-
     do {
-        // Exibe o menu para usabilidade
         exibirMenu();
 
-        // Leitura da opção
         if (scanf("%d", &opcao) != 1) {
             printf("\n[ERRO] Entrada inválida. Por favor, digite um número.\n");
             limparBuffer();
-            opcao = -1; // Força a repetição do loop
+            opcao = -1; 
             continue;
         }
 
-        // Fluxo de execução
         switch (opcao) {
             case 1:
-                inserirItem();
+                lerNovoComponente();
                 break;
             case 2:
-                removerItem();
+                mostrarComponentes(componentes, numComponentes);
                 break;
             case 3:
-                listarItens();
-                break;
             case 4:
-                ordenarInventario();
-                break;
             case 5:
-                buscarSequencial();
+                medirEOrdenar(opcao);
                 break;
-            case 6:
-                buscarBinaria();
+            case 6: {
+                char chave[30];
+                printf("\n--- ATIVAR TORRE DE FUGA ---\n");
+                printf("Digite o NOME do componente-chave para destravar a torre: ");
+                limparBuffer();
+                fgets(chave, sizeof(chave), stdin);
+                chave[strcspn(chave, "\n")] = 0;
+
+                int pos = buscaBinariaPorNome(componentes, numComponentes, chave);
+                
+                if (pos > 0) {
+                    printf("\n[CRÍTICO] Componente-Chave '%s' encontrado na Posição %d.\n", chave, pos);
+                    printf(">>>>> TORRE DE RESGATE ATIVADA! <<<<<\n");
+                } else {
+                    printf("\n[ALERTA] Componente-Chave '%s' não encontrado. Reorganize o inventário (Opção 3) e tente novamente.\n", chave);
+                }
                 break;
+            }
             case 0:
-                printf("\n[FIM DE JOGO] Inventário otimizado. Boa sorte na missão!\n");
+                printf("\n[SUCESSO] Missão Finalizada! Você escapou da ilha.\n");
                 break;
             default:
                 printf("\n[ALERTA] Opção inválida. Tente novamente.\n");
